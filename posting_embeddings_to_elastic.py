@@ -30,29 +30,47 @@ es = Elasticsearch(
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")  
 # → 384-d embeddings
 
+
 # -----------------------
-# Create index mapping (if not already exists)
+# Chunking function
 # -----------------------
-if not es.indices.exists(index=ES_INDEX):
-    es.indices.create(
-        index=ES_INDEX,
-        body={
-            "mappings": {
-                "properties": {
-                    "source": {"type": "keyword"},
-                    "company": {"type": "keyword"},
-                    "title": {"type": "text"},
-                    "date": {"type": "date"},
-                    "url": {"type": "keyword"},
-                    "content": {"type": "text"},
-                    "embedding": {
-                        "type": "dense_vector",
-                        "dims": 384
-                    }
-                }
+def chunk_text(text, chunk_size=800, overlap=100):
+    """Split text into overlapping chunks of words."""
+    words = text.split()
+    chunks = []
+    start = 0
+    
+    while start < len(words):
+        end = start + chunk_size
+        chunk = " ".join(words[start:end])
+        chunks.append(chunk)
+        start += chunk_size - overlap  # overlap for context
+    
+    return chunks
+
+# -----------------------
+# Step 1: Delete old index and recreate
+# -----------------------
+if es.indices.exists(index=ES_INDEX):
+    es.indices.delete(index=ES_INDEX)
+
+es.indices.create(
+    index=ES_INDEX,
+    body={
+        "mappings": {
+            "properties": {
+                "source": {"type": "keyword"},
+                "company": {"type": "keyword"},
+                "title": {"type": "text"},
+                "date": {"type": "date"},
+                "url": {"type": "keyword"},
+                "content": {"type": "text"},
+                "chunk_id": {"type": "integer"},
+                "embedding": {"type": "dense_vector", "dims": 384}
             }
         }
-    )
+    }
+)
 
 # -----------------------
 # Load JSON articles
@@ -61,28 +79,32 @@ with open(JSON_FILE, "r", encoding="utf-8") as f:
     articles = json.load(f)
 
 # -----------------------
-# Generate embeddings & index docs
+# Step 3: Generate chunked embeddings & index
 # -----------------------
-for i, article in enumerate(articles):
+doc_id = 0  # unique id across chunks
+for article_id, article in enumerate(articles):
     content = article.get("content", "")
     if not content.strip():
         continue
-    
-    # Generate embedding
-    embedding = model.encode(content).tolist()
 
-    # Prepare doc
-    doc = {
-        "source": article.get("source"),
-        "company": article.get("company"),
-        "title": article.get("title"),
-        "date": article.get("date"),
-        "url": article.get("url"),
-        "content": content,
-        "embedding": embedding
-    }
+    # Split into chunks
+    chunks = chunk_text(content, chunk_size=800, overlap=100)
 
-    # Index into Elasticsearch
-    es.index(index=ES_INDEX, id=i, body=doc)
+    for chunk_id, chunk in enumerate(chunks):
+        embedding = model.encode(chunk).tolist()
 
-print(f"✅ Articles embedded with Sentence-BERT and stored in Elasticsearch index: {ES_INDEX}")
+        doc = {
+            "source": article.get("source"),
+            "company": article.get("company"),
+            "title": article.get("title"),
+            "date": article.get("date"),
+            "url": article.get("url"),
+            "content": chunk,         # only this chunk’s text
+            "chunk_id": chunk_id,     # so we know which part of article
+            "embedding": embedding,
+        }
+
+        es.index(index=ES_INDEX, id=doc_id, body=doc)
+        doc_id += 1
+
+print(f"✅ Re-indexed {doc_id} chunks into Elasticsearch index: {ES_INDEX}")
