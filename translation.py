@@ -10,7 +10,7 @@ with open("genai_competitors_articles.json", "r", encoding="utf-8") as f:
     articles = json.load(f)
 
 # Initialize Gemini model (text-only)
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 translated_articles = []
 
