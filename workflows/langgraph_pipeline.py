@@ -1,9 +1,9 @@
 """
 LangGraph Ingestion Pipeline
 =============================
-Loads translated articles from JSON, chunks them, generates embeddings,
-and upserts them into Supabase (pgvector) with deterministic doc_ids so
-re-running the pipeline never creates duplicates.
+Full pipeline: fetch live articles from EventRegistry, translate non-English
+content, chunk, embed, and upsert into Supabase (pgvector). Deterministic
+doc_ids ensure re-runs never create duplicates.
 
 Run:
     python -m workflows.langgraph_pipeline
@@ -11,14 +11,27 @@ Run:
 
 import hashlib
 import json
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, TypedDict
 
+from eventregistry import EventRegistry, QueryArticlesIter
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langdetect import detect
 from langgraph.graph import END, StateGraph
+
+COMPANIES = [
+    "OpenAI",
+    "Anthropic",
+    "Google DeepMind",
+    "Meta AI",
+    "Microsoft AI",
+    "Mistral AI",
+    "Cohere",
+    "Hugging Face",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +67,70 @@ class PipelineState(TypedDict):
     indexed_count: int
     errors: List[str]
     settings: Optional[Any]
+
+
+# ---------------------------------------------------------------------------
+# Node: fetch_articles
+# ---------------------------------------------------------------------------
+
+
+def fetch_articles(state: PipelineState) -> PipelineState:
+    """
+    Fetch the latest articles from EventRegistry for each company in COMPANIES
+    and save them to the configured JSON path. Downstream load_articles reads
+    this file, so the rest of the pipeline is unchanged.
+    """
+    settings = state.get("settings") or _get_settings()
+    date_end = datetime.utcnow().strftime("%Y-%m-%d")
+    date_start = (datetime.utcnow() - timedelta(days=settings.news_lookback_days)).strftime("%Y-%m-%d")
+    print(f"[fetch_articles] Fetching articles from {date_start} to {date_end}")
+
+    try:
+        er = EventRegistry(apiKey=settings.event_registry_api_key, allowUseOfArchive=True)
+    except Exception as exc:
+        msg = f"[fetch_articles] Failed to initialise EventRegistry: {exc}"
+        print(msg)
+        return {**state, "errors": state["errors"] + [msg], "settings": settings}
+
+    all_articles = []
+    for company in COMPANIES:
+        print(f"[fetch_articles]   Fetching: {company} ...")
+        try:
+            query = QueryArticlesIter(
+                keywords=company,
+                dateStart=date_start,
+                dateEnd=date_end,
+                lang=["eng", "spa", "fra", "deu", "zho"],
+            )
+            count = 0
+            for art in query.execQuery(er, maxItems=settings.news_max_items_per_company):
+                all_articles.append({
+                    "source": art.get("source", {}).get("title", ""),
+                    "company": company,
+                    "title": art.get("title"),
+                    "date": art.get("dateTime"),
+                    "url": art.get("url"),
+                    "content": art.get("body"),
+                })
+                count += 1
+            print(f"[fetch_articles]     -> {count} articles")
+        except Exception as exc:
+            msg = f"[fetch_articles] Failed for company '{company}': {exc}"
+            print(msg)
+            state["errors"].append(msg)
+
+    print(f"[fetch_articles] Total fetched: {len(all_articles)} articles")
+
+    try:
+        with open(settings.articles_json_path, "w", encoding="utf-8") as f:
+            json.dump(all_articles, f, indent=2, ensure_ascii=False)
+        print(f"[fetch_articles] Saved to {settings.articles_json_path}")
+    except Exception as exc:
+        msg = f"[fetch_articles] Failed to save JSON: {exc}"
+        print(msg)
+        return {**state, "errors": state["errors"] + [msg], "settings": settings}
+
+    return {**state, "settings": settings}
 
 
 # ---------------------------------------------------------------------------
@@ -249,13 +326,15 @@ def build_pipeline():
     """Compile and return the LangGraph ingestion pipeline."""
     graph = StateGraph(PipelineState)
 
+    graph.add_node("fetch_articles", fetch_articles)
     graph.add_node("load_articles", load_articles)
     graph.add_node("translate_non_english", translate_non_english)
     graph.add_node("chunk_documents", chunk_documents)
     graph.add_node("generate_embeddings", generate_embeddings)
     graph.add_node("index_to_supabase", index_to_supabase)
 
-    graph.set_entry_point("load_articles")
+    graph.set_entry_point("fetch_articles")
+    graph.add_edge("fetch_articles", "load_articles")
     graph.add_edge("load_articles", "translate_non_english")
     graph.add_edge("translate_non_english", "chunk_documents")
     graph.add_edge("chunk_documents", "generate_embeddings")

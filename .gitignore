@@ -1,0 +1,65 @@
+# ── Legacy / archived code ───────────────────────────────────────────────────
+_old/
+
+# ── Environment & secrets ─────────────────────────────────────────────────────
+# backend/config.py has NO hardcoded secrets — all values come from .env
+# Never commit the actual .env file
+.env
+*.env
+*.env.*
+!.env.example
+# Extra safety net for any local secret dumps
+secrets.json
+credentials.json
+service_account*.json
+*_key.json
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# ── Pipeline output / data files ─────────────────────────────────────────────
+genai_competitors_articles.json
+genai_competitors_articles_translated.json
+*.json
+!.env.example
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Bandit state dump (debug helper) ─────────────────────────────────────────
+bandit_state.json
