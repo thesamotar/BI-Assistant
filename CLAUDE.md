@@ -10,12 +10,12 @@ Self-Updating AI Assistant for Business Intelligence — a RAG + RLHF system tha
 
 **FastAPI backend:**
 ```bash
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 **Streamlit frontend:**
 ```bash
-streamlit run frontend/streamlit_app.py
+python -m streamlit run frontend/streamlit_app.py
 ```
 
 **Data pipeline (fetch → translate → chunk → embed → index):**

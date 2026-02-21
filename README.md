@@ -125,13 +125,13 @@ python -m workflows.langgraph_pipeline
 ### 4. Start the backend
 
 ```bash
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ### 5. Start the frontend
 
 ```bash
-streamlit run frontend/streamlit_app.py
+python -m streamlit run frontend/streamlit_app.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501).
@@ -289,7 +289,7 @@ Key packages: `fastapi`, `uvicorn`, `langchain`, `langchain-google-genai`, `lang
 
 ```bash
 pip install -r requirements.txt
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 On startup you'll see:
@@ -308,7 +308,7 @@ API is live at `http://localhost:8000`. Docs at `http://localhost:8000/docs`.
 In a second terminal:
 
 ```bash
-streamlit run frontend/streamlit_app.py
+python -m streamlit run frontend/streamlit_app.py
 ```
 
 Open `http://localhost:8501`. The sidebar shows a live green/red indicator for backend and Supabase connectivity.
