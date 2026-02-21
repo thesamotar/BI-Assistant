@@ -1,0 +1,19 @@
+INFO:     Started server process [16900]
+INFO:     Waiting for application startup.
+[startup] Loading embedding model...
+[startup] Embedding model loaded.
+[startup] Connecting to Supabase...
+[startup] Supabase connected.
+[startup] Ready.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[UCB1Bandit] Loaded 2 feedback records from Supabase
+INFO:     127.0.0.1:7994 - "POST /ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52209 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52213 - "POST /feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52216 - "POST /feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52218 - "POST /feedback HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:21307 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47673 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51576 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51580 - "POST /ask HTTP/1.1" 200 OK
