@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
         losses = reranker.update()
         mean_loss = float(np.mean(losses)) if losses else float("nan")
-        has_nan = any(math.isnan(l) for l in losses)
+        has_nan = any(math.isnan(loss) for loss in losses)
 
         print(
             f"Round {round_num}: "

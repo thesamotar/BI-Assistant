@@ -1,6 +1,25 @@
-# BI Assistant — Self-Updating AI for Business Intelligence
+# BI Assistant
 
-A production-ready **RAG + RLHF** system that fetches live business news about GenAI competitors, indexes them as vector embeddings in Supabase (pgvector), and answers queries via Gemini with citation-based responses. User feedback on answers drives UCB1 bandit re-ranking of future results.
+> A self-updating AI for Business Intelligence — RAG + RLHF powered by LangChain, Gemini, and Supabase.
+
+[![CI](https://github.com/thesamotar/BI-Assistant/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/thesamotar/BI-Assistant/actions/workflows/ci-cd.yml)
+![Python](https://img.shields.io/badge/python-3.10+-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green)
+![LangChain](https://img.shields.io/badge/LangChain-LCEL-orange)
+![Supabase](https://img.shields.io/badge/Supabase-pgvector-3ECF8E)
+
+BI Assistant fetches live news about GenAI competitors (OpenAI, Anthropic, Google DeepMind, and more), indexes them as vector embeddings in Supabase, and answers natural-language queries via Gemini with cited sources. Every 👍/👎 you give re-ranks future results through a UCB1 multi-armed bandit — the assistant gets smarter the more you use it.
+
+---
+
+## Features
+
+- **Live data ingestion** — one command fetches, translates, chunks, embeds, and indexes ~400 articles from EventRegistry
+- **Citation-based answers** — Gemini answers are grounded in retrieved sources, with URLs cited inline
+- **Feedback-driven re-ranking** — UCB1 bandit adjusts document scores based on user votes, persisted in Supabase
+- **Streamlit dashboard** — query input, source score table, 👍👎 buttons, query history, live health indicators
+- **Fully modular backend** — FastAPI + LangChain LCEL, clean separation of routers/services/models
+- **CI** — ruff linting + pip-audit security scan on every push
 
 ---
 
@@ -16,10 +35,10 @@ A production-ready **RAG + RLHF** system that fetches live business news about G
 │               BACKEND (FastAPI :8000)                        │
 │                                                              │
 │  POST /ask ──► FeedbackAwareRetriever                        │
-│                  1. Embed query (all-MiniLM-L6-v2)          │
+│                  1. Embed query (all-MiniLM-L6-v2)           │
 │                  2. match_documents RPC (top 2×k)            │
-│                  3. UCB1 re-rank (vector + bandit score)     │
-│                  4. Build context → Gemini → answer          │
+│                  3. UCB1 re-rank (vector + bandit score)      │
+│                  4. Build context → Gemini → answer           │
 │                                                              │
 │  POST /feedback ──► store in Supabase → update bandit        │
 │  GET  /health   ──► Supabase connectivity check              │
@@ -34,19 +53,98 @@ A production-ready **RAG + RLHF** system that fetches live business news about G
 ┌─────────────┴───────────────────────────────────────────────┐
 │              DATA PIPELINE (LangGraph)                       │
 │                                                              │
-│  fetch_articles ──► load_articles ──► translate_non_english  │
-│       │                                      │               │
-│  EventRegistry                          Gemini (non-EN)      │
-│  (8 companies, 30 days, 50 art/co)           │               │
-│                                    chunk_documents           │
-│                                   (3200 chars, 400 overlap)  │
-│                                         │                    │
+│  fetch_articles → load_articles → translate_non_english      │
+│       │                                   │                  │
+│  EventRegistry                       Gemini (non-EN)         │
+│  8 companies · 30 days · 50 art/co        │                  │
+│                                   chunk_documents            │
+│                                  (3200 chars, 400 overlap)   │
+│                                          │                   │
 │                                  generate_embeddings         │
 │                                   (384-dim, batch=64)        │
-│                                         │                    │
+│                                          │                   │
 │                                  index_to_supabase           │
 │                                   (upsert on doc_id)         │
 └─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | FastAPI + Pydantic Settings |
+| LLM | Google Gemini 2.5-flash (LangChain LCEL) |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384d) |
+| Vector store | Supabase pgvector |
+| Data pipeline | LangGraph (6-node graph) |
+| News source | EventRegistry (newsapi.ai) |
+| Translation | Gemini + `langdetect` |
+| Re-ranking | UCB1 multi-armed bandit |
+| Frontend | Streamlit |
+| Orchestration | n8n (Docker) |
+| CI | GitHub Actions — ruff + pip-audit |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.10+
+- A [Supabase](https://supabase.com) project with the `pgvector` extension enabled and a `match_documents` RPC function
+- A [Google Gemini](https://aistudio.google.com) API key
+- An [EventRegistry](https://newsapi.ai) API key
+
+### Installation
+
+```bash
+git clone https://github.com/thesamotar/BI-Assistant.git
+cd BI-Assistant
+pip install -r requirements.txt
+```
+
+### Configuration
+
+```bash
+cp .env.example .env
+# Fill in SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY, EVENT_REGISTRY_API_KEY
+```
+
+All available settings are documented in `.env.example`.
+
+### 1. Run the data pipeline
+
+Fetches live articles, translates, chunks, embeds, and indexes to Supabase in one command. Run this first, and re-run periodically to keep data fresh.
+
+```bash
+python -m workflows.langgraph_pipeline
+```
+
+### 2. Start the backend
+
+```bash
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+API docs available at `http://localhost:8000/docs`.
+
+### 3. Start the frontend
+
+In a second terminal:
+
+```bash
+python -m streamlit run frontend/streamlit_app.py
+```
+
+Open `http://localhost:8501`.
+
+### 4. (Optional) n8n orchestrator
+
+```bash
+docker-compose up
+# http://localhost:5678  —  admin / admin123
 ```
 
 ---
@@ -55,268 +153,133 @@ A production-ready **RAG + RLHF** system that fetches live business news about G
 
 ```
 BI-Assistant/
-├── backend/                        # FastAPI application
-│   ├── main.py                     # App entry point, lifespan, CORS
-│   ├── config.py                   # Pydantic Settings (reads .env)
+├── backend/
+│   ├── main.py                  # FastAPI entry point, lifespan, CORS
+│   ├── config.py                # Pydantic Settings (reads .env)
 │   ├── models/
-│   │   ├── request_models.py       # QueryRequest, QueryResponse
-│   │   └── feedback_models.py      # FeedbackRequest, FeedbackType
+│   │   ├── request_models.py    # QueryRequest, QueryResponse
+│   │   └── feedback_models.py   # FeedbackRequest, FeedbackType
 │   ├── routers/
-│   │   ├── ask.py                  # POST /ask
-│   │   ├── feedback.py             # POST /feedback
-│   │   └── health.py               # GET /health
+│   │   ├── ask.py               # POST /ask
+│   │   ├── feedback.py          # POST /feedback
+│   │   └── health.py            # GET /health
 │   └── services/
-│       ├── embeddings.py           # HuggingFace embeddings (cached)
-│       ├── feedback_rl.py          # Supabase client, UCB1 bandit
-│       └── rag_pipeline.py         # FeedbackAwareRetriever + LCEL chain
-│
+│       ├── embeddings.py        # HuggingFace embeddings (lru_cache)
+│       ├── feedback_rl.py       # Supabase client + UCB1 bandit
+│       └── rag_pipeline.py      # FeedbackAwareRetriever + LCEL chain
 ├── workflows/
-│   └── langgraph_pipeline.py       # 6-node LangGraph ingestion pipeline
-│
+│   └── langgraph_pipeline.py    # 6-node LangGraph ingestion pipeline
 ├── rl/
-│   ├── bandit.py                   # UCB1Bandit (update, get_score, load)
-│   └── ppo_experiment.py           # PPO re-ranker (research/educational)
-│
+│   ├── bandit.py                # UCB1Bandit implementation
+│   └── ppo_experiment.py        # PPO re-ranker (research)
 ├── frontend/
-│   └── streamlit_app.py            # Streamlit dashboard (fully implemented)
-│
-├── _old/                           # Legacy monolithic code (gitignored)
-│   ├── app.py                      # Original single-file FastAPI + Elasticsearch
-│   ├── example.py                  # NewsAPI fetch script
-│   ├── posting_embeddings_to_elastic.py
-│   ├── translation.py
-│   ├── test_app.py / test_rlhf.py
-│   └── vector_search_example.py
-│
-├── genai_competitors_articles.json # Articles output (pipeline writes here)
-├── .env.example                    # Environment variables template
-├── docker-compose.yml              # n8n orchestrator
-├── requirements.txt
-└── setup.sh
+│   └── streamlit_app.py         # Streamlit dashboard
+├── .github/workflows/ci-cd.yml  # Lint + security CI
+├── ruff.toml                    # Ruff lint config
+├── .env.example                 # Environment variable template
+├── docker-compose.yml           # n8n orchestrator
+└── requirements.txt
 ```
-
----
-
-## Quick Start
-
-### 1. Clone and install
-
-```bash
-git clone <repo-url>
-cd BI-Assistant
-pip install -r requirements.txt
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# Fill in your Supabase URL/key, Gemini API key, and EventRegistry API key
-```
-
-### 3. Run the data pipeline
-
-Fetches live articles, translates, chunks, embeds, and indexes to Supabase in one command:
-
-```bash
-python -m workflows.langgraph_pipeline
-```
-
-### 4. Start the backend
-
-```bash
-python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-### 5. Start the frontend
-
-```bash
-python -m streamlit run frontend/streamlit_app.py
-```
-
-Open [http://localhost:8501](http://localhost:8501).
-
-### 6. (Optional) n8n workflow orchestrator
-
-```bash
-docker-compose up
-# Access at http://localhost:5678  (admin / admin123)
-```
-
----
-
-## Data Pipeline Detail
-
-The LangGraph pipeline (`workflows/langgraph_pipeline.py`) runs 6 nodes in sequence:
-
-| Node | What it does |
-|------|-------------|
-| `fetch_articles` | Queries EventRegistry for 8 GenAI companies over the last 30 days (50 articles each), saves to `genai_competitors_articles.json` |
-| `load_articles` | Reads the JSON file into pipeline state |
-| `translate_non_english` | Detects language; translates non-English articles to English via Gemini |
-| `chunk_documents` | Splits content into 3200-char chunks with 400-char overlap; assigns deterministic SHA-256 `doc_id` per `url + chunk_index` |
-| `generate_embeddings` | Encodes all chunks in batches of 64 using `all-MiniLM-L6-v2` (384 dims) |
-| `index_to_supabase` | Upserts chunks + embeddings into the `documents` table using `doc_id` as the conflict key — fully idempotent |
-
-Companies tracked: OpenAI, Anthropic, Google DeepMind, Meta AI, Microsoft AI, Mistral AI, Cohere, Hugging Face.
 
 ---
 
 ## API Reference
 
-### `POST /ask`
+<details>
+<summary><code>POST /ask</code></summary>
 
+**Request**
 ```json
-// Request
-{ "query": "What are OpenAI's latest product announcements?", "top_k": 5 }
-
-// Response
 {
-  "answer": "OpenAI announced... [https://example.com]",
-  "sources": ["https://example.com", "..."],
-  "scores": [0.8421, 0.7903, "..."],
-  "model": "gemini-2.5-flash"
+  "query": "What are OpenAI's latest product announcements?",
+  "top_k": 5
 }
 ```
 
-### `POST /feedback`
-
+**Response**
 ```json
-// Request
+{
+  "answer": "OpenAI announced... [https://example.com]",
+  "sources": ["https://example.com"],
+  "scores": [0.8421],
+  "model": "gemini-2.5-flash"
+}
+```
+</details>
+
+<details>
+<summary><code>POST /feedback</code></summary>
+
+**Request**
+```json
 {
   "query": "What are OpenAI's latest product announcements?",
   "answer": "...",
   "sources": ["https://example.com"],
-  "feedback": "positive"   // or "negative"
+  "feedback": "positive"
 }
 ```
+</details>
 
-### `GET /health`
+<details>
+<summary><code>GET /health</code></summary>
 
+**Response**
 ```json
 { "status": "ok", "supabase": "ok" }
 ```
+</details>
 
 ---
 
-## Retrieval & Re-ranking
+## How Re-ranking Works
 
-Retrieval uses a two-stage approach:
+Retrieval is a two-stage process:
 
-1. **Vector similarity** — `match_documents` Supabase RPC fetches 2× `top_k` candidates using cosine similarity on the 384-dim embedding.
-2. **UCB1 re-ranking** — Each candidate URL gets a bandit score:
-   ```
-   score = mean_reward + sqrt(2 · ln(N) / n)
-   ```
-   where reward = 1.0 (👍) or 0.0 (👎), N = total feedback events, n = feedback for this URL. The final ranking uses `vector_score + ucb1_score`.
+1. **Vector search** — `match_documents` Supabase RPC retrieves 2× `top_k` candidates by cosine similarity.
+2. **UCB1 re-ranking** — each candidate URL gets a bandit score:
 
-The bandit state is rebuilt from Supabase on every startup, so it persists across restarts with no extra infrastructure.
+$$\text{score} = \bar{x} + \sqrt{\frac{2 \ln N}{n}}$$
+
+where $\bar{x}$ is the mean reward (1.0 = 👍, 0.0 = 👎), $N$ is total feedback events, and $n$ is feedback count for that URL. Final rank = `vector_score + ucb1_score`.
+
+The bandit state is rebuilt from Supabase on every startup — no extra infrastructure needed.
 
 ---
 
-## Configuration
-
-All settings are in `backend/config.py` (Pydantic `BaseSettings`). Values can be overridden with a `.env` file:
+## Configuration Reference
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SUPABASE_URL` | — | Supabase project URL |
-| `SUPABASE_KEY` | — | Supabase service role key |
+| `SUPABASE_KEY` | — | Service role key |
 | `SUPABASE_DB_PASSWORD` | — | Database password |
-| `DOCUMENTS_TABLE` | `documents` | pgvector table name |
-| `FEEDBACK_TABLE` | `feedback` | Feedback table name |
-| `MATCH_FUNCTION` | `match_documents` | Supabase RPC function |
 | `GEMINI_API_KEY` | — | Google Gemini API key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Generation model |
 | `GEMINI_TRANSLATION_MODEL` | `gemini-2.5-flash` | Translation model |
-| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace embedding model |
-| `EVENT_REGISTRY_API_KEY` | — | EventRegistry (newsapi.ai) API key |
-| `NEWS_LOOKBACK_DAYS` | `30` | Days of news to fetch |
-| `NEWS_MAX_ITEMS_PER_COMPANY` | `50` | Max articles per company |
-| `ARTICLES_JSON_PATH` | `genai_competitors_articles.json` | Pipeline JSON output path |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model |
+| `EVENT_REGISTRY_API_KEY` | — | EventRegistry API key |
+| `NEWS_LOOKBACK_DAYS` | `30` | Days of history to fetch |
+| `NEWS_MAX_ITEMS_PER_COMPANY` | `50` | Articles per company |
+| `DOCUMENTS_TABLE` | `documents` | Supabase table for chunks |
+| `FEEDBACK_TABLE` | `feedback` | Supabase table for votes |
+| `MATCH_FUNCTION` | `match_documents` | Supabase RPC function |
+| `ARTICLES_JSON_PATH` | `genai_competitors_articles.json` | Pipeline output file |
 | `FRONTEND_ORIGIN` | `http://localhost:8501` | CORS allowed origin |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | FastAPI + Pydantic |
-| LLM | Google Gemini 2.5-flash (via LangChain) |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384d) |
-| Vector store | Supabase pgvector |
-| RAG framework | LangChain LCEL |
-| Data pipeline | LangGraph (6-node graph) |
-| News source | EventRegistry (newsapi.ai) |
-| Translation | Gemini + `langdetect` |
-| Re-ranking | UCB1 multi-armed bandit |
-| RL experiment | PPO (`rl/ppo_experiment.py`) |
-| Frontend | Streamlit |
-| Orchestration | n8n (Docker) |
-| CI | GitHub Actions (lint + security audit) |
 
 ---
 
 ## CI
 
-Two checks run automatically on every push and PR to `main` via GitHub Actions (`.github/workflows/ci-cd.yml`):
+Every push and PR to `main` runs two GitHub Actions jobs:
 
-| Job | Tool | What it checks |
-|-----|------|---------------|
+| Job | Tool | Checks |
+|-----|------|--------|
 | `lint` | `ruff` | Syntax errors, undefined names, bad imports |
-| `security` | `pip-audit` | Known CVEs in `requirements.txt` dependencies |
-
-Lint rules are configured in `ruff.toml` — `_old/` and `logs/` are excluded.
+| `security` | `pip-audit` | Known CVEs in dependencies |
 
 ---
 
-## Requirements
+## License
 
-```bash
-pip install -r requirements.txt
-```
-
-Key packages: `fastapi`, `uvicorn`, `langchain`, `langchain-google-genai`, `langchain-huggingface`, `langgraph`, `sentence-transformers`, `supabase`, `google-generativeai`, `eventregistry`, `langdetect`, `streamlit`.
-
----
-
-## Running Locally
-
-**Prerequisites:** Python 3.10+, `.env` file filled in (copy from `.env.example`).
-
-### Backend
-
-```bash
-pip install -r requirements.txt
-python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-On startup you'll see:
-```
-[startup] Loading embedding model...
-[startup] Embedding model loaded.
-[startup] Connecting to Supabase...
-[startup] Supabase connected.
-[startup] Ready.
-```
-
-API is live at `http://localhost:8000`. Docs at `http://localhost:8000/docs`.
-
-### Frontend
-
-In a second terminal:
-
-```bash
-python -m streamlit run frontend/streamlit_app.py
-```
-
-Open `http://localhost:8501`. The sidebar shows a live green/red indicator for backend and Supabase connectivity.
-
-### Run the data pipeline first (if Supabase is empty)
-
-```bash
-python -m workflows.langgraph_pipeline
-```
-
-This fetches ~400 fresh articles, translates, chunks, embeds, and indexes them. Run it once before querying, and re-run periodically to keep data fresh.
+[MIT](LICENSE)
