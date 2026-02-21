@@ -4,13 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Self-Updating AI Assistant for Business Intelligence — a RAG + RLHF system that ingests live business news (competitors, filings, GitHub repos), indexes them as vector embeddings in Elasticsearch, and answers queries via an LLM with citation-based responses. Feedback on answers drives re-ranking of future results.
+Self-Updating AI Assistant for Business Intelligence — a RAG + RLHF system that fetches live news about GenAI competitors via EventRegistry, indexes article chunks as vector embeddings in Supabase (pgvector), and answers queries via Gemini with citation-based responses. User feedback drives UCB1 bandit re-ranking of future results.
 
 ## Running the Project
 
-**FastAPI backend (main app):**
+**FastAPI backend:**
 ```bash
-uvicorn app:app --reload
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Streamlit frontend:**
+```bash
+streamlit run frontend/streamlit_app.py
+```
+
+**Data pipeline (fetch → translate → chunk → embed → index):**
+```bash
+python -m workflows.langgraph_pipeline
 ```
 
 **n8n workflow orchestrator (Docker):**
@@ -19,94 +29,89 @@ docker-compose up
 # Access at http://localhost:5678  (credentials: admin / admin123)
 ```
 
-**Streamlit frontend:**
+**PPO experiment (optional, educational):**
 ```bash
-streamlit run frontend/streamlit_app.py
-```
-
-**Data pipeline scripts (run in order):**
-```bash
-python example2.py           # Fetch articles from EventRegistry
-python translation.py        # Translate non-English articles via Gemini
-python posting_embeddings_to_elastic.py  # Chunk, embed, and index to Elasticsearch
-```
-
-**Tests:**
-```bash
-python test_app.py
-python test_rlhf.py
-python vector_search_example.py  # Manual vector search smoke test
+python -m rl.ppo_experiment
 ```
 
 ## Architecture
 
-The system has two runtime components and a data ingestion pipeline:
+### Backend (`backend/`)
+The real implementation lives in `backend/`, not in the root `app.py` (which is legacy and lives in `_old/`).
 
-### Runtime (app.py — the real implementation)
-The actual working code lives in **`app.py`** in the root, not in the `backend/` directory (which has empty placeholder files). `app.py` is a single-file FastAPI app with:
+- `backend/main.py` — FastAPI entry point; warms up embeddings and Supabase on startup
+- `backend/config.py` — Pydantic `BaseSettings`; all secrets come from `.env`, never hardcoded
+- `backend/routers/ask.py` — `POST /ask`: embeds query → `match_documents` RPC (top 2×k) → UCB1 re-rank → Gemini answer
+- `backend/routers/feedback.py` — `POST /feedback`: stores thumbs up/down in Supabase, updates bandit
+- `backend/routers/health.py` — `GET /health`: Supabase connectivity check
+- `backend/services/embeddings.py` — `get_embeddings()` (HuggingFace `all-MiniLM-L6-v2`, 384d, lru_cache)
+- `backend/services/feedback_rl.py` — Supabase client, UCB1 bandit singleton, `store_feedback()`, `get_feedback_scores()`
+- `backend/services/rag_pipeline.py` — `FeedbackAwareRetriever` (LangChain `BaseRetriever`) + LCEL chain + `run_rag_pipeline()`
 
-- `POST /ask` — encodes the query with SentenceTransformer, does a `script_score` cosine similarity search in Elasticsearch, applies feedback-based score adjustments (±0.1 per positive/negative vote), re-ranks, builds a context block, and calls Gemini to generate a cited answer.
-- `POST /feedback` — stores `positive`/`negative` feedback in a separate Elasticsearch index (`bi-assistant-feedback`), which is read back by `/ask` to adjust scores.
+### Data Pipeline (`workflows/langgraph_pipeline.py`)
+6-node LangGraph graph, run with `python -m workflows.langgraph_pipeline`:
 
-### Data Ingestion Pipeline (root-level scripts)
 ```
-example.py / example2.py  →  translation.py  →  posting_embeddings_to_elastic.py
-    (fetch articles)           (translate)          (chunk → embed → index)
+fetch_articles → load_articles → translate_non_english → chunk_documents → generate_embeddings → index_to_supabase
 ```
 
-- Chunking: 800-word windows with 100-word overlap, deterministic IDs to avoid duplicates.
-- Embedding model: `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions).
-- Elasticsearch index: `bi-assistant-1729` with a `dense_vector` field.
+- `fetch_articles` — queries EventRegistry for 8 companies, last 30 days, 50 articles each; saves to `genai_competitors_articles.json`
+- `translate_non_english` — detects language; translates non-English via Gemini
+- `chunk_documents` — 3200-char chunks, 400-char overlap; SHA-256 `doc_id` per `url_chunkindex`
+- `generate_embeddings` — batch=64, 384-dim embeddings
+- `index_to_supabase` — upsert on `doc_id` (idempotent)
 
-### Planned (not yet implemented)
-The `backend/`, `rl/`, `workflows/`, and `frontend/` directories contain empty placeholder files for a planned refactor into a modular architecture with LangGraph pipelines, multi-armed bandit re-ranking, and a Streamlit UI.
+### Reinforcement Learning (`rl/`)
+- `rl/bandit.py` — `UCB1Bandit`: `update()`, `get_score()`, `load_from_supabase()`, `save_to_json()`
+- `rl/ppo_experiment.py` — PPO re-ranker (research/educational, not used in production)
+
+### Frontend (`frontend/streamlit_app.py`)
+Fully implemented Streamlit dashboard: query input, answer display, source scores table, 👍👎 feedback buttons, query history, health indicator in sidebar.
 
 ## Key Configuration
 
-All credentials are currently hardcoded in source files (no `.env`). The relevant constants are at the top of `app.py`, `posting_embeddings_to_elastic.py`, `translation.py`, and the example scripts:
+All credentials are in `.env` (gitignored). Copy `.env.example` to `.env` and fill in:
 
-| Variable | Location | Purpose |
-|---|---|---|
-| `ES_URL` | app.py | GCP-hosted Elasticsearch cluster |
-| `ES_INDEX` | app.py | `"bi-assistant-1729"` — article chunks |
-| `FEEDBACK_INDEX` | app.py | `"bi-assistant-feedback"` — RLHF votes |
-| Elasticsearch API key | app.py | Auth for all ES operations |
-| Gemini API key | app.py, translation.py | LLM generation + translation |
-| NewsAPI / EventRegistry key | example.py, example2.py | Article ingestion |
+| Variable | Purpose |
+|----------|---------|
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_KEY` | Supabase service role key |
+| `SUPABASE_DB_PASSWORD` | Database password |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `EVENT_REGISTRY_API_KEY` | EventRegistry (newsapi.ai) key |
+| `GEMINI_MODEL` | Default: `gemini-2.5-flash` |
+| `EMBEDDING_MODEL` | Default: `sentence-transformers/all-MiniLM-L6-v2` |
+| `NEWS_LOOKBACK_DAYS` | Default: `30` |
+| `NEWS_MAX_ITEMS_PER_COMPANY` | Default: `50` |
+
+**Never hardcode credentials** — `backend/config.py` uses empty string defaults and reads everything from `.env`.
 
 ## Requirements
 
-Install all dependencies with:
 ```bash
-pip install fastapi uvicorn pydantic sentence-transformers elasticsearch google-generativeai langdetect newsapi-python eventregistry requests numpy streamlit
+pip install -r requirements.txt
 ```
 
-| Package | pip name | Used in |
-|---|---|---|
-| `fastapi` | `fastapi` | app.py — API framework |
-| `uvicorn` | `uvicorn` | serving FastAPI |
-| `pydantic` | `pydantic` | app.py — request/response models |
-| `sentence-transformers` | `sentence-transformers` | app.py, posting_embeddings_to_elastic.py, vector_search_example.py |
-| `elasticsearch` | `elasticsearch` | app.py, posting_embeddings_to_elastic.py, vector_search_example.py |
-| `google-generativeai` | `google-generativeai` | app.py, translation.py — Gemini LLM + translation |
-| `langdetect` | `langdetect` | translation.py — language detection |
-| `newsapi-python` | `newsapi-python` | example.py — NewsAPI ingestion |
-| `eventregistry` | `eventregistry` | example2.py — EventRegistry ingestion |
-| `requests` | `requests` | test_app.py, test_rlhf.py |
-| `numpy` | `numpy` | vector_search_example.py |
-| `streamlit` | `streamlit` | frontend/streamlit_app.py (placeholder) |
-
-> **Note:** `requirements.txt` is currently empty. The above list was compiled from actual imports across all `.py` files.
+Key packages: `fastapi`, `uvicorn`, `pydantic-settings`, `langchain`, `langchain-google-genai`, `langchain-huggingface`, `langgraph`, `sentence-transformers`, `supabase`, `google-generativeai`, `eventregistry`, `langdetect`, `streamlit`.
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
-| Backend | FastAPI + Pydantic |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
-| Vector store | Elasticsearch (GCP, dense_vector + script_score) |
-| LLM | Google Gemini (`gemini-2.5-pro`) |
-| Translation | Google Gemini + `langdetect` |
-| Orchestration | n8n (Docker), LangGraph (planned) |
-| Frontend | Streamlit (placeholder) |
-| RL/feedback | Score adjustment in `/ask`; bandit/PPO planned in `rl/` |
+|-------|-----------|
+| Backend | FastAPI + Pydantic Settings |
+| LLM | Google Gemini 2.5-flash (via LangChain) |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384d) |
+| Vector store | Supabase pgvector (`match_documents` RPC) |
+| RAG framework | LangChain LCEL |
+| Data pipeline | LangGraph (6-node graph) |
+| News source | EventRegistry (newsapi.ai) |
+| Re-ranking | UCB1 multi-armed bandit (`rl/bandit.py`) |
+| Frontend | Streamlit |
+| Orchestration | n8n (Docker) |
+
+## File Structure Notes
+
+- `_old/` — legacy monolithic code (Elasticsearch-based `app.py`, old 3-script pipeline, test scripts); gitignored
+- `genai_competitors_articles.json` — pipeline output; gitignored (regenerated by `fetch_articles` node)
+- `backend/config.py` — safe to commit; no hardcoded secrets
+- `.env` — gitignored; contains real credentials

@@ -254,6 +254,20 @@ All settings are in `backend/config.py` (Pydantic `BaseSettings`). Values can be
 | RL experiment | PPO (`rl/ppo_experiment.py`) |
 | Frontend | Streamlit |
 | Orchestration | n8n (Docker) |
+| CI | GitHub Actions (lint + security audit) |
+
+---
+
+## CI
+
+Two checks run automatically on every push and PR to `main` via GitHub Actions (`.github/workflows/ci-cd.yml`):
+
+| Job | Tool | What it checks |
+|-----|------|---------------|
+| `lint` | `ruff` | Syntax errors, undefined names, bad imports |
+| `security` | `pip-audit` | Known CVEs in `requirements.txt` dependencies |
+
+Lint rules are configured in `ruff.toml` — `_old/` and `logs/` are excluded.
 
 ---
 
@@ -264,3 +278,45 @@ pip install -r requirements.txt
 ```
 
 Key packages: `fastapi`, `uvicorn`, `langchain`, `langchain-google-genai`, `langchain-huggingface`, `langgraph`, `sentence-transformers`, `supabase`, `google-generativeai`, `eventregistry`, `langdetect`, `streamlit`.
+
+---
+
+## Running Locally
+
+**Prerequisites:** Python 3.10+, `.env` file filled in (copy from `.env.example`).
+
+### Backend
+
+```bash
+pip install -r requirements.txt
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+On startup you'll see:
+```
+[startup] Loading embedding model...
+[startup] Embedding model loaded.
+[startup] Connecting to Supabase...
+[startup] Supabase connected.
+[startup] Ready.
+```
+
+API is live at `http://localhost:8000`. Docs at `http://localhost:8000/docs`.
+
+### Frontend
+
+In a second terminal:
+
+```bash
+streamlit run frontend/streamlit_app.py
+```
+
+Open `http://localhost:8501`. The sidebar shows a live green/red indicator for backend and Supabase connectivity.
+
+### Run the data pipeline first (if Supabase is empty)
+
+```bash
+python -m workflows.langgraph_pipeline
+```
+
+This fetches ~400 fresh articles, translates, chunks, embeds, and indexes them. Run it once before querying, and re-run periodically to keep data fresh.

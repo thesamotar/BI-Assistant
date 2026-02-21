@@ -1,0 +1,8 @@
+exclude = ["_old", "logs"]
+
+[lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line too long — not enforced
+    "F401",  # imported but unused — too noisy with LangChain re-exports
+]
